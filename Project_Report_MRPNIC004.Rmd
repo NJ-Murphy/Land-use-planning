@@ -1,0 +1,1154 @@
+---
+title: | 
+ | Optimization Techniques for Land-use Planning 
+#"Optimization Project: Land Use Planning"
+author: |
+    | Optimization Project
+    | N. Murphy
+date: "`r format(Sys.time(), '%B %e, %Y')`"
+output: 
+  bookdown::pdf_document2:
+    #bibliography: bibliography.bib
+    toc: true
+    number_sections: true
+    fig_width: 7
+    fig_height: 7
+    fig_caption: true
+    includes:
+      in_header: untitled.tex
+      
+    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=FALSE)
+ #knitr::opts_chunk$set(echo = TRUE)
+library(kableExtra)
+library(tidyverse,quietly)
+```
+# Problem Description
+The aim of this project is to explore various optimization techniques in order to optimally allocate a set of 9 pre-specified land-use types to a 400ha region subject to mutiple objectives and constraints. The idea is to develop the brackish peat meadow which is criss-crossed by water and populated by vast amounts of vegetation and bird life as part of a nature and recreation development plan. As part of the development plan, three additive objectives were identified to transform the current region subject to constraints such as the total amount of land allocated to each of the land-use types and to certain areas of land in the region which cannot be converted from their current uses. 
+
+```{r, include=FALSE,eval=TRUE}
+rm(list=ls()) # clear environment
+#-+-+-+-+-+-+-+
+## Figure 2 c |
+#-+-+-+-+-+-+-+
+r1 <- c(1,1,8,rep(1,4),8,rep(1,4),rep(8,3),rep(1,5))
+r2 <- c(1,1,8,8,rep(1,3),rep(8,4),rep(7,3),rep(8,3),rep(1,3))
+r3 <- c(1,1,1,rep(8,2),rep(1,2),8,rep(1,2),rep(8,2),7,rep(8,7))
+r4 <- c(1,1,1,1,rep(8,2),1,8,rep(1,3),rep(8,7),rep(1,2))
+r5 <- c(rep(1,5),8,1,rep(8,3),rep(1,3),rep(8,7))
+r6 <- c(rep(8,4),1,rep(8,3),7,rep(8,5),rep(1,6))
+r7 <- c(rep(1,3),rep(8,4),rep(7,3),8,8,rep(1,5),rep(8,3))
+r8 <- c(rep(1,4),6,1,rep(8,9),1,8,8,1,1)
+r9 <- c(rep(3,5),rep(8,3),rep(1,6),8,8,8,1,1,1)
+r10 <- c(rep(5,2),3,rep(8,7),1,1,1,8,8,1,8,8,8,8)
+r11 <- c(5,rep(8,13),rep(1,6))
+r12 <- c(8,8,1,rep(8,9),1,8,8,rep(1,5))
+r13 <- c(rep(1,3),rep(8,6),1,1,8,1,1,rep(8,6))
+r14 <- c(1,rep(8,8),1,1,8,8,rep(1,7))
+r15 <- c(8,8,1,1,rep(8,4),5,3,1,1,8,8,8,8,rep(1,4))
+r16 <- c(rep(1,5),8,8,8,5,rep(3,3),8,1,1,rep(8,5))
+r17 <- c(1,1,rep(8,5),rep(3,5),8,rep(1,4),8,rep(1,2))
+r18 <- c(8,8,rep(1,5),rep(3,4),5,rep(8,8))
+r19 <- c(8,rep(1,3),8,rep(3,6),rep(4,2),8,rep(1,6))
+r20 <- c(rep(8,5),rep(3,3),rep(4,5),8,8,rep(1,5))
+
+Fig2c <- rbind(r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,r16,r17,r18,r19,r20)
+
+
+library(ggplot2); 
+library(reshape2)
+col = c("green4","red4","aquamarine4","yellow","magenta","yellow4","turquoise1")
+
+Fig2cdf <- data.frame(indv=factor(paste("Y",1:20),
+                                levels = rev(paste("Y",1:20))), as.matrix(Fig2c))
+Fig2cdf1 <- Fig2cdf[,1:20]
+
+Fig2cdf2 <- melt(Fig2cdf, id.var = 'indv')
+
+Fig2cdf2[Fig2cdf2[,3]==1,3] <- 2
+```
+
+# Formulation of the problem
+In order to set up the problem, the 400ha region is divided into 1ha blocks of land each of which containing one single land-use type. This constitutes the first set of constraints to the optimisation problem. This allows us to illustrate the region as a 20x20 grid and visualise the allocated land-use types of each block in the grid giving a convenient representation of the region and planned developments as given by the optimal solutions we obtain. Figure \@ref(fig:2c) below illustrates the 400ha region as a grid and the land-use types which currently exist in the region.
+
+```{r 2c,echo=FALSE,fig.width=8,fig.height=6,fig.cap="A simplified illustration of the 400ha region showing the land types that currently occupy each 1ha block of land."}
+p <- ggplot(Fig2cdf2, aes(variable, indv,fill=as.factor(value))) + geom_tile(color = "gray") +   scale_fill_manual(values= col,labels=c("Intensive Agriculture","Residence","Industry","Recreation (day trips)","Recreation (overnight)","wet natural area", "Water (Recreational)"))
+p + guides(fill=guide_legend(title="Land-use Type")) + labs(x = "X",y = "Y")
+```
+
+As mentioned above, there are three objectives that were identidied as part of the development plan. They are as follows:
+
+1) maximise the natural value of the region
+2) maximise the recreatioinal value of the region
+3) minimise the cost of changing land use
+
+In order to structure the problem efficiently, we will specify a lanuse map as a binary vector of 3600 (400x9) elements. Here, each element will specify the row, the column and the land-use type allocated. For instance, the first cell of the grid (1,1) will be represented by the first 9 elements of the 3600 long vector. 8 of the 9 elements will be zero and one single element, say the $k_{th}$ element, will hold a one which specifies that the first grid cell will be allocated landuse $k$. The next 9 elements in the vector will represent the second grid cell and so on. We will go from left to right in each row of the grid amd proceed row by row down the grid in this manner. This vector representation will make it a ot easier to construct the problem as an integer program. Hence, we will have 3600 binary decision variables in our LP. 
+
+The plot below illustrates the amount of value added for each grid cell to nature (a) and recreation (a), (b) and (c). Table 1 then specifies how each of these value maps are incorporated into the objective functions for nature and recreation. 
+
+```{r,warning=FALSE,message=FALSE,echo=FALSE,fig.width=8,fig.height=9,fig.cap="Value maps for nature (a) and recreation (a), (b) and (c)."}
+
+#-+-+-+-+-+-+-+
+## Figure 3 a |
+#-+-+-+-+-+-+-+
+load("data/spatialDSS_inputs.RData")
+Fig3a <- fig_3a
+Fig3b <- fig_3b
+Fig3c <- fig_3c
+
+library(ggplot2)
+library(reshape2)
+
+Fig3adf <- data.frame(indv=factor(paste("Y",1:20),
+                                  levels = rev(paste("Y",1:20))), as.matrix(Fig3a))
+
+Fig3adf2 <- melt(Fig3adf, id.var = 'indv')
+
+#-+-+-+-+-+-+-+
+## Figure 3 b |
+#-+-+-+-+-+-+-+
+#rm(list=ls()) # clear environment
+
+Fig3bdf <- data.frame(indv=factor(paste("Y",1:20),
+                                  levels = rev(paste("Y",1:20))), as.matrix(Fig3b))
+#Fig3adf1 <- Fig3adf[,1:20]
+
+Fig3bdf2 <- melt(Fig3bdf, id.var = 'indv')
+
+#-+-+-+-+-+-+-+
+## Figure 3 c |
+#-+-+-+-+-+-+-+
+#rm(list=ls()) # clear environment
+
+Fig3cdf <- data.frame(indv=factor(paste("Y",1:20),
+                                  levels = rev(paste("Y",1:20))), as.matrix(Fig3c))
+#Fig3adf1 <- Fig3adf[,1:20]
+
+Fig3cdf2 <- melt(Fig3cdf, id.var = 'indv')
+
+library(gridExtra)
+
+p1 <- ggplot(Fig3cdf2, aes(variable, indv)) + theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(aes(fill = value),color = "gray") + scale_colour_gradientn(colours=rainbow(5)) +
+  guides(fill=guide_legend(title="Value")) + labs(x = "X",y = "Y")
+ 
+ p2 <- ggplot(Fig3bdf2, aes(variable, indv))+ theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(aes(fill = value),color = "gray") + scale_colour_gradientn(colours=rainbow(5)) +
+   guides(fill=guide_legend(title="Value")) + labs(x = "X",y = "Y")
+
+p3 <- ggplot(Fig3adf2, aes(variable, indv))+ theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(aes(fill = value),color = "gray") + scale_color_manual(breaks = c("10","8", "6","5", "3"),values=c("steelblue1","steelblue2", "steelblue3","steelblue", "steelblue4")) +
+guides(fill=guide_legend(title="Value")) + labs(x = "X",y = "Y")
+#+ scale_color_brewer(palette="Blues") #+scale_colour_gradientn(colours=rainbow(5)) +  
+#+ scale_colour_gradientn(colours=rainbow(5)) 
+
+
+#grid.arrange(p1,p2,p3,nrow=3)
+
+library(cowplot)
+plot_grid(p1, p2, p3, nrow = 3, labels = c("(a)","(b)","(c)"))
+```
+
+```{r,echo=FALSE}
+library(tidyverse,quietly)
+naturevaltablevals <- c("1 intensive agriculture", 4, 6,
+"2 extensive agriculture", "map figure 3(a)","map figure 2(a)", "3 residence", 3, 3,
+"4 industry", 1, 1,
+"5 recreation (day trips)", 5, "map figure 2(b)","6 recreation (overnight)", 5, "map figure 2(c)","7 wet natural area","map figure 2(a)", 7,"8 water (recreational use)", 7, "map figure 2(b)","9 water (limited access)", "map figure 2(a)", 1)
+naturevaltable <- data.frame(matrix(naturevaltablevals,9,3,byrow = TRUE))
+colnames(naturevaltable) <- c("Land-use type (k)","Nature value","Recreation value")
+
+knitr::kable(naturevaltable,caption="Values for nature and recreation per land-use type..", format="latex", booktabs=TRUE, row.names = TRUE) %>% kable_styling(latex_options=c("striped", "HOLD_position")) 
+```
+
+
+## Problem Constraints
+All of the objectives satisfy the same set of constraints. The first set of constraints we will enforce is that each cell in the grid must be allocated only one land use. Thus, the sum of the 3600 long vector for a grid map should add up to 400 as one land type falls in each cell and the rest of the elements are zero. This is implemented by creating a constraint that ensures the sum of all decision variables is equalt to 400. 
+
+The next set of constraints pertains to the fact the only one landuse can be allocated to each cell. To implement this, we set up 400 constraints whereby each constraint will consisit of the sum of decisions variables that represent a given cell and those variables must sum up to one. For example, the sum of the first 9 decision variables representing the first cell which are the first 9 elements of the 3600 long vector must have a sum equal to one. The same goes for the next 9 elements after that and we continue on in this manner for all 400 nine element vectors of decision variables. 
+
+The next set of constraints pertain to the minimum and maximum total number of grid cells in the region that can be allocated to each land type $k$. This results in 18 constraints, a lower and upper bound for each land-use type. These are given in the following table:
+
+```{r,echo=FALSE}
+b_nature <- c(80,150,20,65,20,45,5,15,0,70,0,35,0,30,120,150,0,60,400,rep(1,44),rep(1,400))
+bmin <- b_nature[seq(1,18,2)]
+bmax <- b_nature[seq(2,18,2)]
+
+minmaxcons <- data.frame(cbind(c("Intensive Agriculture","Extensive Agriculture","Residence","Industry","Recreation (day trips)","Recreation (overnight)","wet natural area", "Water (Recreational)","Water (limited access")),bmin,bmax)
+
+colnames(minmaxcons ) <- c("Land-use type","Minimun","Maximum")
+
+knitr::kable(minmaxcons,caption="Minimum and maximum size per land-use type.", format="latex", booktabs=TRUE, row.names = TRUE) %>% kable_styling(latex_options=c("striped", "HOLD_position")) 
+
+```
+
+
+
+
+```{r, include=FALSE,eval=TRUE}
+# -+-+-+-+-+-+
+## Figure 5  |
+# -+-+-+-+-+-+
+r1 <- rep(0,20)
+r2 <- c(rep(0,11),rep(7,3),rep(0,6))
+r3 <- c(rep(0,12),7,rep(0,7))
+r4 <- rep(0,20)
+r5 <- rep(0,20)
+r6 <- c(rep(0,8),7,rep(0,11))
+r7 <- c(rep(0,7),rep(7,3),rep(0,10))
+r8 <- c(rep(0,4),6,rep(0,15))
+r9 <- c(rep(3,5),rep(0,15))
+r10 <- c(rep(0,2),3,rep(0,17))
+r11r14 <- matrix(0,4,20)
+r15 <- c(rep(0,9),3,rep(0,10))
+r16 <- c(rep(0,9),rep(3,3),rep(0,8))
+r17 <- c(rep(0,7),rep(3,5),rep(0,8))
+r18 <- c(rep(0,7),rep(3,4),rep(0,9))
+r19 <- c(rep(0,5),rep(3,6),rep(4,2),rep(0,7))
+r20 <- c(rep(0,5),rep(3,3),rep(4,5),rep(0,7))
+
+Fig5 <- rbind(r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11r14,r15,r16,r17,r18,r19,r20)
+
+
+library(gplots)
+
+Fig5df <- data.frame(indv=factor(paste("Y",1:20),
+                                  levels = rev(paste("Y",1:20))), as.matrix(Fig5))
+#Fig3adf1 <- Fig3adf[,1:20]
+
+Fig5df2 <- melt(Fig5df, id.var = 'indv')
+
+## EOF
+```
+
+
+The final set of constraints concern the fixed constraints as specified in the figure below. There are a total of 44 fixed contraints which fix a certain land-use type to cells in the grid as illustrated in the figure.
+
+```{r 3d,echo=FALSE,fig.width=8,fig.height=6,fig.cap="Fixed land-use types."}
+library(gridExtra)
+
+col = c("white","red4","aquamarine4","magenta","yellow4")
+
+p <- ggplot(Fig5df2, aes(variable, indv,fill=as.factor(value))) + geom_tile(color = "gray") +   scale_fill_manual(values= col,labels=c("Not Fixed","Residence","Industry","Recreation (overnight)","wet natural area", "Water (Recreational)")) + guides(fill=guide_legend(title="Land-use Type")) + labs(x = "X",y = "Y")
+plot(p)
+```
+All in all there are a total of 463 constraints that need to be satisfied. 
+
+
+# Linear Programming 
+In order to implement the LP we will use the \textit{Rglpk} package in R. The \textit{Rglpk\_solve\_LP} function takes on 6 input parameters. The first input is the objective function which we will specify as a 3600 element vector of coefficients pertaining to a given objective which we will discuss in more detail in the next 3 subsections. The seocond input is the constraint matrix containing the coefficients of the constraint matrix which we will input as a simple triplet matrix using the \textit{simple\_triplet\_matrix} function from the slam package which is used due to the sparseness of the constraints. The rest of the inputs are the constraint inequalities as a vector, the right hand side of the constraints that each cosntraint must satisfy and whether it is a maximization or minimization problem specified as a boolean. We will now discuss the objective functions (coefficients) for each of the three objectives. 
+
+
+## Objective 1: Natural Value
+The natural value of the of the region is calcluated by first specifying the amount of natural value that each grid cell contributes to the overall natural value based on the land use type that is allocated to that cell. The natural value is the computed by summing up the total natural value in the 400 cell grid area given by the function 
+
+$$f_{nature}(\boldsymbol{\mu}) = \sum_{r=1}^{20}\sum_{c=1}^{20}\sum_{k=1}^{9}a_{rck}\mathscr{X}_{rck}$$ 
+
+where the value assigned to each land-use type $k$ in a given grid cell $(r,c)$ is $a_{rck}$. $\mathscr{X}_{rck}$ will take on a value of 1 or 0 depending on whther land type $k$ has been allocated to grid cell $(r,c)$. $a_{rck}$ is specified in table 2 where the value will either be constant over all grid cells or will be based on the value maps illustrated in figure 2 and thus the natural value will depend on the row ($r$) and column ($c$) index of the grid.
+
+
+
+```{r, include=FALSE,eval=TRUE}
+## Optimisation Project
+#
+# Reuired: 
+# 1. Rdata file containing land uses for figure ... (a)
+#
+# Problem Specification: 
+#
+# Author : N Murphy
+#
+## Version Control 
+# ~/R/Opt/Project/Land-use-planning
+
+## 1. Clear environemnt and remove all plots
+rm(list=ls()) # clear environment
+#dev.off()
+
+## 2. load required libraries
+library(Rglpk)
+
+## 3. Load previously prepared data
+load("data/spatialDSS_inputs_fig5.RData")
+load("data/landtypes.Rdata")
+load("data/spatialDSS_inputs.RData")
+Fig3a <- fig_3a
+Fig3b <- fig_3b
+Fig3c <- fig_3c
+
+############################################################################
+## 4. Data Processing
+
+n <- 3600
+nrows <- 20
+ncols <- 20
+nooflandtypes <- 9
+
+## coefficients of the objective function
+objcoeffs <- rbind(rep(4,400),as.vector(t(Fig3a)),rep(3,400),rep(1,400),rep(5,400),rep(5,400),as.vector(t(Fig3a)),rep(7,400),as.vector(t(Fig3a)))
+
+Objective <- numeric()
+for (j in 1:400) {
+  for (i in 1:9){
+    Objective <- c(Objective,objcoeffs[i,j])
+  }
+}
+Objective_nature <- as.matrix(Objective)
+objcoeffs_nat <- objcoeffs
+
+## coefficients of the constraint matrix
+#predifine the constraints that make up the 3600x3600 matrix of constraints
+int_agriconstmin_ind <- numeric()
+int_agriconstmax_ind <- numeric()
+ext_agriconstmin <- numeric()
+ext_agriconstmax <- numeric()
+residencemin <- numeric()
+residencemax <- numeric()
+industrymin <- numeric()
+industrymax <- numeric()
+recreationdaymin <- numeric()
+recreationdaymax <- numeric()
+recreationnightmin <- numeric()
+recreationnightmax <- numeric()
+wetareamin <- numeric()
+wetareamax <- numeric()
+waterrecreationalmin <- numeric()
+waterrecreationalmax <- numeric()
+waterlimitedmin <- numeric()
+waterlimitedmax <- numeric()
+
+# populate the column indices for each constraint
+for (i in seq(1, n,9)) {
+  int_agriconstmin_ind <- cbind(int_agriconstmin_ind,i)
+  int_agriconstmax_ind <- cbind(int_agriconstmax_ind,i)
+  ext_agriconstmin <- cbind(ext_agriconstmin,i+1)
+  ext_agriconstmax <- cbind(ext_agriconstmax,i+1)
+  residencemin <- cbind(residencemin,i+2)
+  residencemax <- cbind(residencemax,i+2)
+  industrymin <- cbind(industrymin,i+3)
+  industrymax <- cbind(industrymax,i+3)
+  recreationdaymin <- cbind(recreationdaymin,i+4)
+  recreationdaymax <- cbind(recreationdaymax,i+4)
+  recreationnightmin <- cbind(recreationnightmin,i+5)
+  recreationnightmax <- cbind(recreationnightmax,i+5)
+  wetareamin <- cbind(wetareamin,i+6)
+  wetareamax <- cbind(wetareamax,i+6)
+  waterrecreationalmin <- cbind(waterrecreationalmin,i+7)
+  waterrecreationalmax <- cbind(waterrecreationalmax,i+7)
+  waterlimitedmin <- cbind(waterlimitedmax,i+8)
+  waterlimitedmax <- cbind(waterlimitedmax,i+8)
+}
+
+# land (grid) constraint column ind
+landconstraint <- as.numeric(c(1:n))
+
+#create a vector of the column indices of all constraints
+colinds <- cbind(int_agriconstmin_ind,int_agriconstmax_ind,ext_agriconstmin,
+                 ext_agriconstmax,residencemin,residencemax,
+                 industrymin,industrymax,recreationdaymin,recreationdaymax,recreationnightmin,
+                 recreationnightmax,wetareamin,wetareamax,waterrecreationalmin,
+                 waterrecreationalmax, waterlimitedmin,waterlimitedmax,t(landconstraint))
+
+# Compute the row indices of activity constraints
+rowinds <- numeric()
+for (i in 1:(18)){
+  rowinds <- c(rowinds,rep(i,400))
+}
+#add land constraints (400 blocks maximum)
+rowinds <- c(rowinds,rep(19,n))
+
+## add figure 5 constraints 
+#column indices
+Fig5indices <- which(Fig5!=0,arr.ind = T)
+Fig5indices <- Fig5indices[order(Fig5indices[,1]), ]
+Fig5values <- as.vector(Fig5[Fig5indices])
+fixedconstraint_colinds <- numeric()
+
+for (i in 1:length(Fig5values)){
+  # the following formula gives the vector index of the grid position (index)
+  fixedconstraint_colinds <- c(fixedconstraint_colinds,(Fig5indices[i,1]-1)*20*9 + Fig5indices[i,2]*9 - (9-Fig5values[i])) 
+}
+fixedconstraint_colinds <- as.matrix(fixedconstraint_colinds)
+
+#populate fixed constraints into vector indices of all other constraints
+colinds <- c(colinds,fixedconstraint_colinds)
+colinds <- as.matrix(colinds)
+
+#row indices
+for (i in 20:(19+length(Fig5values))){
+  rowinds <- c(rowinds,i)
+}
+rowinds <- as.matrix(rowinds)
+
+## add constraints for maximum of one activity per grid block
+#blockconstraint <- numeric()
+for (i in 64:(63+nrows*ncols)){
+  rowinds <- c(rowinds,rep(i,9))
+}
+colinds <- c(colinds,1:n)
+
+## create the spasre matrix of constraint coeffs
+sparse_mat_nature <- simple_triplet_matrix(i = rowinds, j = colinds, v = c(rep(1,length(colinds))))
+realmat <- as.matrix(sparse_mat_nature) #check that sparse matrix makes sense
+
+#compute RHS of constraints
+b_nature <- c(80,150,20,65,20,45,5,15,0,70,0,35,0,30,120,150,0,60,400,rep(1,44),rep(1,400))
+
+# signs of the constraints
+constraint_ineq_nature <- c(">=", "<=",">=", "<=",">=", "<=",">=", "<=", ">=","<=",">=", "<=",">=","<=",">=", "<=",">=", "<=", "<=",rep("==",44),rep("==",400))
+
+#variable types
+var_types <- rep("B",n)
+
+## Solve the LP problem
+LPsolve <- Rglpk_solve_LP(obj = Objective_nature, mat = sparse_mat_nature, dir = constraint_ineq_nature, rhs = b_nature, types = var_types, max = TRUE)
+
+## plot the optimal solution
+LPsolveSolution <- as.matrix(LPsolve$solution)
+#LPsolveSolution 
+sum(LPsolveSolution)
+
+## display solution as grid 
+#first populate solution into grid form
+LPsolveSolutiongrid <- matrix(LPsolveSolution,nrow = 400,ncol = 9,byrow=TRUE)
+
+Solutiongridvalues <- matrix(NA,nrows*ncols,1)
+for(i in 1:(nrows*ncols)){
+  Solutiongridvalues[i,1] <-  which(LPsolveSolutiongrid[i,]!=0,arr.ind = T)
+}
+Solutiongrid <- matrix(Solutiongridvalues,nrow = 20,ncol = 20,byrow=TRUE)
+
+#define colours for ggplot
+col = c("green4","green","red4","aquamarine4","yellow","magenta","yellow4","turquoise1","skyblue2")
+
+#get unique values of solution in case htat some landtypes are missing
+colourind <- sort(unique(c(Solutiongrid)))
+
+library(ggplot2); 
+library(reshape2)
+Soldf <- data.frame(indv=factor(paste("Y",1:20),
+                                levels = rev(paste("Y",1:20))), as.matrix(Solutiongrid))
+Soldf <- Soldf[,1:20]
+
+Soldf <- melt(Soldf, id.var = 'indv')
+
+nature_opt <- LPsolve$optimum
+nature_sol <- LPsolve$solution
+```
+
+Implementing \textit{Rglpk\_solve\_LP} on the natural value objective function results in an optimal total nature value given by `r as.numeric(nature_opt)`. The plot of the grid for the optimal natural value for the area is plotted below:
+
+
+```{r,echo=FALSE,fig.width=8,fig.height=6,fig.cap="Optimal land-use allocation for maximizing the natural value of the region."}
+p <- ggplot(Soldf, aes(variable, indv,fill=as.factor(value))) + theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(color = "gray") +   scale_fill_manual(values= col[colourind],labels=landtypes[colourind])
+p + guides(fill=guide_legend(title="Land-use Type")) + labs(x = "X",y = "Y")
+
+```
+
+
+## Objective 2: Recreational Value
+The recreational value of the of the area is calcluated similarly to the natural value by first specifying the amount of recreational value that each grid cell contributes to the overall recreational value based on the land use type that is allocated to that cell. The recreational value is the computed by summing up the total recreational value in the 400 cell grid area given by the function 
+
+$$f_{recreational}(\boldsymbol{\mu}) = \sum_{r=1}^{20}\sum_{c=1}^{20}\sum_{k=1}^{9}a_{rck}\mathscr{X}_{rck}$$ 
+
+where the value assigned to each land-use type $k$ in a given grid cell $(r,c)$ is $a_{rck}$. $\mathscr{X}_{rck}$ will take on a value of 1 or 0 depending on whther land type $k$ has been allocated to grid cell $(r,c)$. Again, as in the natural value case, $a_{rck}$ is specified in table 1 where the value will either be constant over all grid cells or will be based on the value maps in figure 2 and thus the recreational value will depend on the row ($r$) and column ($c$) index of the grid.
+
+```{r, include=FALSE,eval=TRUE}
+## Optimisation Project
+#
+# Reuired: 
+# 1. Rdata file containing land uses for figure ... (a)
+#
+# Problem Specification: 
+#
+# Author : N Murphy
+#
+## Version Control 
+# ~/R/Opt/Project/Land-use-planning
+
+## 1. Clear environemnt and remove all plots
+#rm(list=ls()) # clear environment
+#dev.off()
+
+## 2. load required libraries
+library(Rglpk)
+
+## 3. Load previously prepared data
+load("data/spatialDSS_inputs_fig3a.RData")
+Fig3a <- nature_values
+load("data/spatialDSS_inputs_fig3b.RData")
+load("data/spatialDSS_inputs_fig3c.RData")
+load("data/spatialDSS_inputs_fig5.RData")
+
+
+############################################################################
+## 4. Data Processing
+n <- 3600
+nrows <- 20
+ncols <- 20
+nooflandtypes <- 9
+
+
+## coefficients of the objective function
+objcoeffs <- rbind(rep(6,400),as.vector(t(Fig3a)),rep(3,400),rep(1,400),as.vector(t(Fig3b)),as.vector(t(Fig3c)),rep(7,400),as.vector(t(Fig3b)),rep(1,400))
+
+Objective <- numeric()
+for (j in 1:400) {
+  for (i in 1:9){
+    Objective <- c(Objective,objcoeffs[i,j])
+  }
+}
+Objective_rec <- as.matrix(Objective)
+objcoeffs_rec <- objcoeffs
+
+## coefficients of the constraint matrix
+#predifine the constraints that make up the 3600x3600 matrix of constraints
+int_agriconstmin_ind <- numeric()
+int_agriconstmax_ind <- numeric()
+ext_agriconstmin <- numeric()
+ext_agriconstmax <- numeric()
+residencemin <- numeric()
+residencemax <- numeric()
+industrymin <- numeric()
+industrymax <- numeric()
+recreationdaymin <- numeric()
+recreationdaymax <- numeric()
+recreationnightmin <- numeric()
+recreationnightmax <- numeric()
+wetareamin <- numeric()
+wetareamax <- numeric()
+waterrecreationalmin <- numeric()
+waterrecreationalmax <- numeric()
+waterlimitedmin <- numeric()
+waterlimitedmax <- numeric()
+
+# populate the column indices for each constraint
+for (i in seq(1, nrows*ncols*nooflandtypes,9)) {
+  int_agriconstmin_ind <- cbind(int_agriconstmin_ind,i)
+  int_agriconstmax_ind <- cbind(int_agriconstmax_ind,i)
+  ext_agriconstmin <- cbind(ext_agriconstmin,i+1)
+  ext_agriconstmax <- cbind(ext_agriconstmax,i+1)
+  residencemin <- cbind(residencemin,i+2)
+  residencemax <- cbind(residencemax,i+2)
+  industrymin <- cbind(industrymin,i+3)
+  industrymax <- cbind(industrymax,i+3)
+  recreationdaymin <- cbind(recreationdaymin,i+4)
+  recreationdaymax <- cbind(recreationdaymax,i+4)
+  recreationnightmin <- cbind(recreationnightmin,i+5)
+  recreationnightmax <- cbind(recreationnightmax,i+5)
+  wetareamin <- cbind(wetareamin,i+6)
+  wetareamax <- cbind(wetareamax,i+6)
+  waterrecreationalmin <- cbind(waterrecreationalmin,i+7)
+  waterrecreationalmax <- cbind(waterrecreationalmax,i+7)
+  waterlimitedmin <- cbind(waterlimitedmax,i+8)
+  waterlimitedmax <- cbind(waterlimitedmax,i+8)
+}
+
+# land (grid) constraint column ind
+landconstraint <- as.numeric(c(1:n))
+
+#create a vector of the column indices of all constraints
+colinds <- cbind(int_agriconstmin_ind,int_agriconstmax_ind,ext_agriconstmin,
+                 ext_agriconstmax,residencemin,residencemax,
+                 industrymin,industrymax,recreationdaymin,recreationdaymax,recreationnightmin,
+                 recreationnightmax,wetareamin,wetareamax,waterrecreationalmin,
+                 waterrecreationalmax, waterlimitedmin,waterlimitedmax,t(landconstraint))
+
+# Compute the row indices of activity constraints
+rowinds <- numeric()
+for (i in 1:(18)){
+  rowinds <- c(rowinds,rep(i,400))
+}
+#add land constraints (400 blocks maximum)
+rowinds <- c(rowinds,rep(19,n))
+
+## add figure 5 constraints 
+#column indices
+Fig5indices <- which(Fig5!=0,arr.ind = T)
+Fig5indices <- Fig5indices[order(Fig5indices[,1]), ]
+Fig5values <- as.vector(Fig5[Fig5indices])
+fixedconstraint_colinds <- numeric()
+
+for (i in 1:length(Fig5values)){
+  # the following formula gives the vector index of the grid position (index)
+  fixedconstraint_colinds <- c(fixedconstraint_colinds,(Fig5indices[i,1]-1)*20*9 +  Fig5indices[i,2]*9 - (9-Fig5values[i])) 
+}
+fixedconstraint_colinds <- as.matrix(fixedconstraint_colinds)
+
+#populate fixed constraints into vector indices of all other constraints
+colinds <- c(colinds,fixedconstraint_colinds)
+colinds <- as.matrix(colinds)
+
+#row indices
+for (i in 20:(19+length(Fig5values))){
+  rowinds <- c(rowinds,i)
+}
+rowinds <- as.matrix(rowinds)
+
+## add constraints for maximum of one activity per grid block
+#blockconstraint <- numeric()
+for (i in 64:(63+nrows*ncols)){
+  rowinds <- c(rowinds,rep(i,9))
+}
+colinds <- c(colinds,1:n)
+
+## create the spasre matrix of constraint coeffs
+sparse_mat_rec <- simple_triplet_matrix(i = rowinds, j = colinds, v = c(rep(1,length(colinds))))
+realmat <- as.matrix(sparse_mat_rec) #check that sparse matrix makes sense
+
+#compute RHS of constraints
+b_rec <- c(80,150,20,65,20,45,5,15,0,70,0,35,0,30,120,150,0,60,400,rep(1,44),rep(1,400))
+
+# signs of the constraints
+constaint_ineq_rec <- c(">=", "<=",">=", "<=",">=", "<=",">=", "<=", ">=","<=",">=", "<=",">=","<=",">=", "<=",">=", "<=", "<=",rep("==",44),rep("==",400))
+
+#variable types
+var_types <- rep("B",n)
+
+## Solve the LP problem
+LPsolve <- Rglpk_solve_LP(obj = Objective_rec, mat = sparse_mat_rec, dir = constaint_ineq_rec, rhs = b_rec, types = var_types, max = TRUE)
+
+## plot the optimal solution
+LPsolveSolution <- as.matrix(LPsolve$solution)
+#LPsolveSolution 
+#sum(LPsolveSolution)
+
+## display solution as grid 
+#first populate solution into grid form
+LPsolveSolutiongrid <- matrix(LPsolveSolution,nrow = 400,ncol = 9,byrow=TRUE)
+
+Solutiongridvalues <- matrix(NA,nrows*ncols,1)
+for(i in 1:(nrows*ncols)){
+  Solutiongridvalues[i,1] <-  which(LPsolveSolutiongrid[i,]!=0,arr.ind = T)
+}
+Solutiongrid <- matrix(Solutiongridvalues,nrow = 20,ncol = 20,byrow=TRUE)
+
+#get unique values of solution in case htat some landtypes are missing
+colourind <- sort(unique(c(Solutiongrid)))
+
+col = c("green4","green","red4","aquamarine4","yellow","magenta","yellow4","turquoise1","skyblue2")
+
+
+library(ggplot2); 
+library(reshape2)
+Soldf <- data.frame(indv=factor(paste("Y",1:20),
+                              levels = rev(paste("Y",1:20))), as.matrix(Solutiongrid))
+Soldf <- Soldf[,1:20]
+
+Soldf <- melt(Soldf, id.var = 'indv')
+
+rec_opt <- LPsolve$optimum
+rec_sol <- LPsolve$solution
+## EOF
+```
+
+Implementing \textit{Rglpk\_solve\_LP} on the recreational value objective function results in an optimal (maximum) total recreational value given by `r as.numeric(rec_opt)`. The plot of the grid for the optimal recreational value for the area is plotted below:
+
+
+```{r,echo=FALSE,fig.width=8,fig.height=6,fig.cap="Optimal land-use allocation for maximizing the recreational value of the region."}
+load("data/landtypes.Rdata")
+
+p <- ggplot(Soldf, aes(variable, indv,fill=as.factor(value))) +theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(color = "gray") +   scale_fill_manual(values= col[colourind],labels=landtypes[colourind])
+p + guides(fill=guide_legend(title="Land-use Type")) + labs(x = "X",y = "Y")
+```
+
+
+## Objective 3: Cost of Changing Land Uses
+The third objective concerns the minimization of the cost of changing a land use from its current use, as illustrated in Figure 1, to a new land use type. How it works is that for each pair of land uses, $l$ and $k$, there is a cost associated with changing from land use $l$ to land use $k$ which are illustrated in table 3 below. It must be noted that some changes are infeasible and hence we have set infeasible conversions to have a cost of -1000000. We will implement the problem as a maximization problem and thus maximize revenue which is equivalent to minimizing costs. 
+
+```{r,echo=FALSE}
+cost_matrix <- read.table("data/cost_matrix.txt")
+cost_matrix_dat <- data.frame(cbind(landtypes,cost_matrix))
+colnames(cost_matrix_dat) <- c("Land-use type",1:9)
+#row.names(cost_matrix_dat) <- landtypes
+
+knitr::kable(cost_matrix_dat,caption="Values for nature and recreation per land-use type..", format="latex", booktabs=TRUE, row.names = TRUE) %>% kable_styling(latex_options=c("striped", "HOLD_position")) 
+```
+
+
+Hence, for a given grid cell $(r,c)$, the cost of changing a land use from land use $l$ to land use $k$ is represented by $a_{rck}$. All conversion costs for given land-use types are then added up to arrive at a total cost in a similar fashion to the previous objectives. Positive values will be associated with revenues and negative values as costs. The objective function is then specified as follows
+
+$$f_{cost}(\boldsymbol{\mu}) = \sum_{r=1}^{20}\sum_{c=1}^{20}\sum_{k=1}^{9}a_{rck}\mathscr{X}_{rck}$$ 
+
+
+```{r,include=FALSE,eval=TRUE}
+## Optimisation Project
+#
+# Reuired: 
+# 1. Rdata file containing land uses for figure ... (a)
+#
+# Problem Specification: 
+#
+# Author : N Murphy
+#
+## Version Control 
+# ~/R/Opt/Project/Land-use-planning
+
+## 1. Clear environemnt and remove all plots
+#rm(list=ls()) # clear environment
+#dev.off()
+
+## 2. load required libraries
+library(Rglpk)
+
+## 3. Load previously prepared data
+cost_matrix <- read.table("data/cost_matrix.txt",sep="",header = FALSE)
+# load("data/spatialDSS_inputs_fig3a.RData")
+# Fig3a <- nature_values
+# load("data/spatialDSS_inputs_fig3b.RData")
+# load("data/spatialDSS_inputs_fig3c.RData")
+load("data/spatialDSS_inputs_fig2c.RData")
+load("data/spatialDSS_inputs_fig5.RData")
+load("data/landtypes.Rdata")
+
+
+############################################################################
+## 4. Data Processing
+n <- 3600
+nrows <- 20
+ncols <- 20
+nooflandtypes <- 9
+
+
+## coefficients of the objective function
+Objective <- numeric()
+for (i in 1:nrows){
+  for (j in 1:ncols){
+    for (k in 1:nooflandtypes){
+      if(Fig2c[i,j]==k){
+        Objective <- c(Objective,as.matrix(cost_matrix[k,]))
+      }
+    }
+  }
+}
+Objective_cost <- as.matrix(Objective)
+
+## coefficients of the constraint matrix
+#predifine the constraints that make up the 3600x3600 matrix of constraints
+int_agriconstmin_ind <- numeric()
+int_agriconstmax_ind <- numeric()
+ext_agriconstmin <- numeric()
+ext_agriconstmax <- numeric()
+residencemin <- numeric()
+residencemax <- numeric()
+industrymin <- numeric()
+industrymax <- numeric()
+recreationdaymin <- numeric()
+recreationdaymax <- numeric()
+recreationnightmin <- numeric()
+recreationnightmax <- numeric()
+wetareamin <- numeric()
+wetareamax <- numeric()
+waterrecreationalmin <- numeric()
+waterrecreationalmax <- numeric()
+waterlimitedmin <- numeric()
+waterlimitedmax <- numeric()
+
+# populate the column indices for each constraint
+for (i in seq(1, nrows*ncols*nooflandtypes,9)) {
+  int_agriconstmin_ind <- cbind(int_agriconstmin_ind,i)
+  int_agriconstmax_ind <- cbind(int_agriconstmax_ind,i)
+  ext_agriconstmin <- cbind(ext_agriconstmin,i+1)
+  ext_agriconstmax <- cbind(ext_agriconstmax,i+1)
+  residencemin <- cbind(residencemin,i+2)
+  residencemax <- cbind(residencemax,i+2)
+  industrymin <- cbind(industrymin,i+3)
+  industrymax <- cbind(industrymax,i+3)
+  recreationdaymin <- cbind(recreationdaymin,i+4)
+  recreationdaymax <- cbind(recreationdaymax,i+4)
+  recreationnightmin <- cbind(recreationnightmin,i+5)
+  recreationnightmax <- cbind(recreationnightmax,i+5)
+  wetareamin <- cbind(wetareamin,i+6)
+  wetareamax <- cbind(wetareamax,i+6)
+  waterrecreationalmin <- cbind(waterrecreationalmin,i+7)
+  waterrecreationalmax <- cbind(waterrecreationalmax,i+7)
+  waterlimitedmin <- cbind(waterlimitedmax,i+8)
+  waterlimitedmax <- cbind(waterlimitedmax,i+8)
+}
+
+# land (grid) constraint column ind
+landconstraint <- as.numeric(c(1:n))
+
+#create a vector of the column indices of all constraints
+colinds <- cbind(int_agriconstmin_ind,int_agriconstmax_ind,ext_agriconstmin,
+                 ext_agriconstmax,residencemin,residencemax,
+                 industrymin,industrymax,recreationdaymin,recreationdaymax,recreationnightmin,
+                 recreationnightmax,wetareamin,wetareamax,waterrecreationalmin,
+                 waterrecreationalmax, waterlimitedmin,waterlimitedmax,t(landconstraint))
+
+
+# Compute the row indices of activity constraints
+rowinds <- numeric()
+for (i in 1:(18)){
+  rowinds <- c(rowinds,rep(i,400))
+}
+#add land constraints (400 blocks maximum)
+rowinds <- c(rowinds,rep(19,n))
+
+## add figure 5 constraints 
+#column indices
+Fig5indices <- which(Fig5!=0,arr.ind = T)
+Fig5indices <- Fig5indices[order(Fig5indices[,1]), ]
+Fig5values <- as.vector(Fig5[Fig5indices])
+fixedconstraint_colinds <- numeric()
+
+for (i in 1:length(Fig5values)){
+  # the following formula gives the vector index of the grid position (index)
+  fixedconstraint_colinds <- c(fixedconstraint_colinds,(Fig5indices[i,1]-1)*20*9 +  Fig5indices[i,2]*9 - (9-Fig5values[i])) 
+}
+fixedconstraint_colinds <- as.matrix(fixedconstraint_colinds)
+
+#populate fixed constraints into vector indices of all other constraints
+colinds <- c(colinds,fixedconstraint_colinds)
+colinds <- as.matrix(colinds)
+
+#row indices
+for (i in 20:(19+length(Fig5values))){
+  rowinds <- c(rowinds,i)
+}
+rowinds <- as.matrix(rowinds)
+
+## add constraints for maximum of one activity per grid block
+#blockconstraint <- numeric()
+for (i in 64:(63+nrows*ncols)){
+  rowinds <- c(rowinds,rep(i,9))
+}
+colinds <- c(colinds,1:n)
+
+## add constraints for land types that are infeasible to convert
+for (i in 1:nrows){
+  for (j in 1:ncols){
+    for (k in 1:nooflandtypes){
+      if(Fig2c[i,j]=="NA"){
+        colinds <- c(colinds,(i-1)*20*9 +  (j-1)*9 + k)
+      }
+    }
+  }
+}
+
+## create the sparse matrix of constraint coeffs
+sparse_mat_cost <- simple_triplet_matrix(i = rowinds, j = colinds, v = c(rep(1,length(colinds))))
+#realmat <- as.matrix(sparse_mat) #check that sparse matrix makes sense
+
+#compute RHS of constraints
+b_cost <- c(80,150,20,65,20,45,5,15,0,70,0,35,0,30,120,150,0,60,400,rep(1,44),rep(1,400))
+
+# signs of the constraints
+constaint_ineq_cost <- c(">=", "<=",">=", "<=",">=", "<=",">=", "<=", ">=","<=",">=", "<=",">=","<=",">=", "<=",">=", "<=", "<=",rep("==",44),rep("==",400))
+
+#variable types
+var_types <- rep("B",n)
+
+## Solve the LP problem
+LPsolve <- Rglpk_solve_LP(obj = Objective_cost, mat = sparse_mat_cost, dir = constaint_ineq_cost, rhs = b_cost, types = var_types, max = TRUE)
+costs_opt <- LPsolve$optimum
+options(scipen = 999)
+cost_sol <- LPsolve$solution
+
+```
+
+
+```{r , echo=FALSE, include= FALSE}
+## plot the optimal solution
+LPsolveSolution <- as.matrix(LPsolve$solution)
+#LPsolveSolution 
+sum(LPsolveSolution)
+
+## display solution as grid 
+#first populate solution into grid form
+LPsolveSolutiongrid <- matrix(LPsolveSolution,nrow = 400,ncol = 9,byrow=TRUE)
+
+Solutiongridvalues <- matrix(NA,nrows*ncols,1)
+for(i in 1:(nrows*ncols)){
+  Solutiongridvalues[i,1] <-  which(LPsolveSolutiongrid[i,]!=0,arr.ind = T)
+}
+
+Solutiongrid <- matrix(Solutiongridvalues,nrow = 20,ncol = 20,byrow=TRUE)
+
+library(ggplot2)
+library(reshape2)
+library(gplots)
+Soldf <- data.frame(indv=factor(paste("Y",1:20),levels = rev(paste("Y",1:20))), as.matrix(Solutiongrid))
+Soldf <- melt(Soldf, id.var = 'indv')
+
+#get unique values of solution in case htat some landtypes are missing
+colourind <- sort(unique(c(Solutiongrid)))
+
+col = c("green4","green","red4","aquamarine4","yellow","magenta","yellow4","turquoise1","skyblue2")
+col <- col[colourind]
+## EOF
+```
+
+
+Implementing \textit{Rglpk\_solve\_LP} on the cost objective function results in an optimal (maximum) total revenue (minimum cost) value given by $`r (costs_opt)`$. The plot of the grid for the optimal revenue value for the area is illustrated below:
+
+
+```{r,echo=FALSE,fig.width=8,fig.height=6,fig.cap="Optimal land-use allocation for minimizing the cost of changing land-use types from their current type."}
+p <- ggplot(Soldf, aes(variable, indv,fill=as.factor(value)))+theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(color = "gray") +scale_fill_manual(values= col,labels=landtypes[colourind])
+p + guides(fill=guide_legend(title="Land-use Type")) + labs(x = "X",y = "Y")
+
+initial_popsize <- 10000
+```
+
+
+
+# Genetic Algorithms
+## Single Objective Optimization
+In this section we repeat the same process as we did in section 2 but instead of using Linear Programming to solve the optimization problems, we make use of a genetic algorithm (GA) and compare the corresponding results to that of LP. GA's are population-based optimization methods whereby in every iteration of the algorithm, we deal with a set (popolation) of solutions. The basic idea of a GA is to move a population of solutions towards 'good' regions of the search space. Usually a good region will imply that the fitness of an individual(s) is high there i.e. they obtain high values of the objective function. 
+
+### Design of GA
+The form of the genetic algorithm which we implemented starts with a set of `r initial_popsize` randomly selected landuse maps which will be represented as a binary vector of 3600 elements. At each generation, randomly paired parent solutions are randomly selected, and "crossed-over"" to generate a pair of "child" solutions for each pair of parents. The best half of the total parents and children solutions were retained to form the next parent population. The iterarative process continues for a selected number of generations or until convergence in the objective function value. 
+
+
+#### Initial Solution Generation
+To generate a population of slutions we first allocate the fixed land-use types to each 3600 long individual solution. For each solution, we then sample a value for each land use type between the minimum and maximum size of the land-use types as specified in table 1. 
+
+#### Evaluation
+Evaluation is the process through which we compute the total value of the objective function (fitness) for each parent solution at each generation of the algorithm. The constraints are also checked for each candidate solution and their fitness is penalized if any constraints are violated. 
+
+#### Selection
+The selection process involves selecting a sample of parent solutions from the set of solutions produced at each iteration. Samples are taken based on a set of probabilites attached to each parent solution. The parent with the largest fitness is allocated a relative probabilty of 1 and the one with the worst fitness, a probability of 0.5. The rest of the parent solutions are given probabilities which are found by linearly interpolated between 1 and 0.5. During each selection round, 400 parents are sampled using such probabilities. 
+
+#### Reproduction
+Reproduction or "cross-over" is the process of randomly pairing up parents that result from the selection process and swapping pairs of land use types between the solutions. We begin by computing all combinations of pairs of land use types except pairs in which the land use types are identical ($9^{2}-9 = 72$). For a given combination of land uses $l$ and $k$, we locate the grid cells in each pair of parents where cells of parent 1 have a $l$ allocated and cells of parent 2 have a $k$ allocated in the same grid positions. Half of the number of such cells are allocated land use $k$ in parent 1 and $l$ in parent 2. This process is repeated for all pairs of parents and all combinations at each iteration. The best 400 parents and children are taken to the next iteration.
+
+#### Mutation
+During the mutation process, we define a mutation probability (rate) and sample a set of uniform random numbers between 0 and 1 thats the same size as our population. If the random number is less than the mutation probability, we mutate a chromosone. We then swap 2 random land uses in each chromosone that is to be muatated. 
+
+
+### Objective 1
+The maximum nature value attained by the GA was 2668 compared to 2773 in the LP. Below is the plot of the land use map resultings from the GA and for comparison, we have included the map from the LP implementation below it.
+
+![Optimal land-use allocation for maximizing natural value using the GA.](ga_nat_map.png)
+
+\begin{figure}
+\centering
+\includegraphics[width=13cm]{LP_nat_map.png}
+\caption{Optimal land-use allocation for maximizing natural value using the LP.}
+\end{figure}
+There doesn't seem to be an obvious similarity between the two solutions although there is some overlap in the top right corner with limited access water and extensive agriculture. The GA seems to allocate a few too many recreational land-use types.
+
+
+<!-- ![Optimal land-use allocation for maximizing natural value using the LP.](LP_nat_map.png) -->
+
+The plot below illutrates the mean fitness of the population over generations. The dotted lines represent the fitness of the fittest individual (have to look closely to see the dotted line). 
+
+![Mean fitness of population over generations when optimizing natrual value.](ga_nat_meanfit.png)
+
+
+### Objective 2
+The maximum recreational value attained by the GA was 3056 compared to 3151 in the LP. Below is the plot of the land use map resultings from the GA and for comparison, we have included the map from the LP implementation below it.
+
+![Optimal land-use allocation for maximizing recreational value using the GA.](ga_rec_map.png)
+
+\begin{figure}
+\centering
+\includegraphics[width=15cm]{LP_rec_map.png}
+\caption{Optimal land-use allocation for maximizing recreational value using the LP.}
+\end{figure}
+The GA map for recreational map is probably the mst convinicing of the 3 objectives. It does quite well in allocating recreational land-use types in the correct general areas. 
+
+<!-- ![Optimal land-use allocation for maximizing recreational value using the LP.](LP_rec_map.png) -->
+
+The plot below illutrates the mean fitness of the population over generations. The dotted line represents the fitness of the fittest individual in the population (best solution found by the GA).
+
+![Mean fitness of population over generations when optimizing recreational value.](ga_rec_fitness.png)
+
+### Objective 3
+The minimum cost attained by the GA was 7325 compared to 11950 in the LP. Below is the plot of the land use map resultings from the GA and for comparison, we have included the map from the LP implementation below it.
+
+![Optimal land-use allocation for minimizing the cost of changing land-use types from their current type using the GA.](ga_cost_map.png)
+
+\begin{figure}
+\centering
+\includegraphics[width=13cm]{LP_cost_map.png}
+\caption{Optimal land-use allocation for minimizing the cost of changing land-use types from their current type using the LP.}
+\end{figure}
+There doesnt seem to be obvious similarities between the maps for cost minimization. 
+<!-- ![Optimal land-use allocation for minimizing the cost of changing land-use types from their current type using the LP.](LP_cost_map.png) -->
+
+The plot below illutrates the mean fitness of the population over generations. The dotted lines represent the fitness of the fittest indivdual.
+
+![Mean fitness of population over generations when minimizing the cost of changing land-use types from their current type.](ga_cost_fitness.png)
+
+
+### Comments on Implementation
+After many trials of trying to prevent the GA from converging prematurely, I had to give up on numerous attempts to get it running properly due to time constraints. The values aren't all that far off the optimal values returned by the LP but the GA couldnt seem to get them exact.  
+
+
+
+# Multiobjective Optimization 
+In most real-world optimization problems, decision makers are faced with maximizizing (minimizing) multiple objectives at once as in the case of the land use allocation problem at hand. Rather than just optimizaing each objective on its own as we have done above, we need a method of optimizng all 3 objectives at the same time. Obviously, in majority of cases, we will have to give up on performance on some objectives to perform better in another objective and so we need to find solutions that give a good balance between all the objectives.
+
+## Goal Programming
+In light of the above paragraph, to find a solution with a good balance between objectives, we implement an Archimedean goal program. The idea of goal programming is to obtain a desireable level of performance, $g_{k}$ from each objective $k = 1, \dots, 3$. We then define the magnitude of the deviation of the objective from the goal value as $\delta_{k}$. Assuming each objective is defined as $z_{k}$, we thus want $z_{k} + \delta_{k} \geq g_{k}$. The intuition is that we want to achieve an objective value as good as our goal and we will thus want to minimize the deviation from this goal $\delta_{k}$. If goal achieved then $z_{k} \geq g_{k}$ and $\delta{k} = 0$, if not then
+$z_{k} \leq g_{k}$ and $\delta{k} > 0$ measures the underachievement. A constraint $z_{k} \geq g_{k}$ will be added to the LP for each objective $k$ and our objective will be to minimize $f(\delta{1},\delta{2},\delta{3})$. 
+
+
+### Archimedean Goal Programming
+The goal prgramming approach we take is the Archimedean Goal Program. The approach is tominimize the following objective
+
+$$ \text{Minimize} \sum_{k=1}^{3}w_{k} \delta_{k} $$ 
+subject to:
+\begin{align}
+z_{k} + \delta_{k} \geq g_{k} \quad \text{for} \ k = 1, \dots, n\\
+ \sum_{j=1}^{P} a_{ij} \leq b_{i} \quad \text{for} \ i = 1, \dots, m\\
+ x_{j} \geq 0 \quad \text{for} \ j=1, \dots, P
+ \end{align}
+ 
+The objective function will be a vector of length 3603, the first 3600 representing the decision variables for the land use grid which are all set to zero and the last 3 elements will represent the weights ($w_{k}$) attached to each deviation variable ($\delta_{k}$). 
+
+All the constraint mentioned in the Constraints section (2.1) remain identical for this problem and are represented by the 2nd line in the above set of constraint for the goal program. We will need to add on a row of zeros to the constraint coefficient matrix for each objective (3 extra columns of zeros). The only additional constraints that we add are those in equation (1) of the constraints above. The 3 extra constraints will each be a vector of length 3603 where the first 3600 coefficients are the cofficients of each objective and element 3601, 3602 and 3603 in each of the 3 contraints for objective 1, 2 and 3 respectively will be a have a one (representing $\delta{k}$) with each of the other 2 elements set to zero.   
+
+To specify the goals for each objective, we first compute a payoff table. A payoff table is constructed by optimizing objective functions one-at-a-time and computing the values for the other objectives which are not being optimized in each case. The table is illustrated below. Rows represent the objective being optimized and column the value of each objective for a given optimization case. It is important to note that the infeasible solutions are set to a value of zero in this table (only one solution was infeasible wasthe cost chaning objective when optimizing the recreational objective). 
+
+```{r,echo=FALSE}
+## coefficients of the objective function for costs
+Objective <- numeric()
+for (i in 1:nrows){
+  for (j in 1:ncols){
+    for (k in 1:nooflandtypes){
+      if(Fig2c[i,j]==k){
+        Objective <- c(Objective,as.matrix(cost_matrix[k,]))
+      }
+    }
+  }
+}
+objcoeffs_cost <- c(as.matrix(Objective))
+# 
+# as.vector(LPsolve$solution)%*%as.vector(objcoeffs)
+## Payoff table
+solutions <- rbind(nature_sol,rec_sol,cost_sol)
+objs <- cbind(Objective_nature,Objective_rec,Objective_cost)
+payoff_tab <- matrix(0,3,3)
+
+for (i in 1:3){
+  payoff_tab[i,1] <- as.vector(solutions[i,])%*%objs[,1]
+  payoff_tab[i,2] <- as.vector(solutions[i,])%*%objs[,2]
+  payoff_tab[i,3] <- as.vector(solutions[i,])%*%objs[,3]
+}
+
+# set infeasible solutions to 0
+payoff_tab[payoff_tab<=-100000] <- 0
+#payoff_tab[payoff_tab<0] <- payoff_tab[payoff_tab<0] + 1000000
+
+## goals
+#specify priority of each individual objective
+priority_levels <- rep(0.5,3)
+#compute the range between optimum value and minimum value for each objective in payoff table
+goal_range <- diag(payoff_tab) - apply(payoff_tab,2,min)
+#use priority and range to get value of goal for each obj
+goals <- apply(payoff_tab,2,min) + priority_levels*goal_range 
+#goals <- diag(payoff_tab)
+
+payoff_tab_dat <- data.frame(payoff_tab)
+colnames(payoff_tab_dat) <- c("Obj 1","Obj 2","Obj 3")
+row.names(payoff_tab_dat) <- c("Obj 1","Obj 2","Obj 3")
+
+knitr::kable(payoff_tab_dat,caption="Payoff table for the 3 objectives. Rows represent the objective being optimized and column the value of each objective for a given optimization case.", format="latex", booktabs=TRUE, row.names = TRUE) %>% kable_styling(latex_options=c("striped", "HOLD_position")) 
+```
+We then compute the ranges of each of the objective which is done by taking the minimum and maximum in each column and taking that difference. We specify priority levels for each objective: a number between 0 (low importance) and 1 (high importance) specifying the importance of an objective. The goal is then taken to be the minimum value plus the product of the priority level and the objective range. We choose a priority level of 0.5 for all 3 objectives and get goals: `r goals[1]`, `r goals[2]` and `r goals[3]` for objective 1, 2 and 3 respectively. Choosing a priority level of 0.5 for all 3 objectives gives us equal weights for the objective function: $w_{1} = w_{2} = w_{3} = 0.3333$. 
+
+
+```{r,echo=FALSE}
+## recast goals as constraints
+#add objective constraints that must satisfy
+rowinds <- c(rowinds,rep(464,3601),rep(465,3601),rep(466,3601))
+
+constraint_coeffs <- c(rep(1,length(colinds)),Objective_nature,1,Objective_rec,1,Objective_cost,1)
+colinds <- c(colinds,1:3601,1:3600,3602,1:3600,3603)
+
+#add zero for each weight onto end of each constraint
+sparse_mat <- simple_triplet_matrix(i = rowinds, j = colinds, v = constraint_coeffs,nrow = 466,ncol = 3603)
+
+#compute RHS of constraints
+b <- c(80,150,20,65,20,45,5,15,0,70,0,35,0,30,120,150,0,60,400,rep(1,44),rep(1,400),goals)
+
+# signs of the constraints
+constaint_ineq <- c(">=", "<=",">=", "<=",">=", "<=",">=", "<=", ">=","<=",">=", "<=",">=","<=",">=", "<=",">=", "<=", "<=",rep("==",44),rep("==",400),rep(">=",3))
+
+#variable types
+var_types <- rep("B",n+3)
+
+## Solve the LP problem
+LPsolve <- Rglpk_solve_LP(obj = c(rep(0,3600),priority_levels/sum(priority_levels)), mat = sparse_mat, dir = constaint_ineq, rhs = b, types = var_types, max = F)
+
+```
+Again, we implement \textit{Rglpk} to solve the LP and the optimal value returned is `r LPsolve$optimum` which implies our goal objectives were met since the weighted deviations all sum up to zero. Below we plot the land use map for the solution to the multiobjective LP problem:
+
+```{r,echo=FALSE}
+## plot the optimal solution
+LPsolveSolution <- as.matrix(LPsolve$solution[1:3600])
+
+## display solution as grid 
+#first populate solution into grid form
+LPsolveSolutiongrid <- matrix(LPsolveSolution,nrow = 400,ncol = 9,byrow=TRUE)
+
+Solutiongridvalues <- matrix(NA,nrows*ncols,1)
+for(i in 1:(nrows*ncols)){
+  Solutiongridvalues[i,1] <-  which(LPsolveSolutiongrid[i,]!=0,arr.ind = T)
+}
+
+Solutiongrid <- matrix(Solutiongridvalues,nrow = 20,ncol = 20,byrow=TRUE)
+
+library(ggplot2)
+library(reshape2)
+library(gplots)
+Soldf <- data.frame(indv=factor(paste("Y",1:20),levels = rev(paste("Y",1:20))), as.matrix(Solutiongrid))
+Soldf <- melt(Soldf, id.var = 'indv')
+
+#get unique values of solution in case htat some landtypes are missing
+colourind <- sort(unique(c(Solutiongrid)))
+
+col = c("green4","green","red4","aquamarine4","yellow","magenta","yellow4","turquoise1","skyblue2")
+col <- col[colourind]
+```
+
+```{r,echo=FALSE,fig.width=8,fig.height=6,fig.cap="Optimal land-use allocation for the multiobjective land use problem."}
+p <- ggplot(Soldf, aes(variable, indv,fill=as.factor(value)))+theme(axis.text.x=element_text(angle=90,vjust=0.5)) + geom_tile(color = "gray") +scale_fill_manual(values= col,labels=landtypes[colourind])
+p + guides(fill=guide_legend(title="Land-use Type")) + labs(x = "X",y = "Y")
+
+```
+
+
+# References
+[1] Stewart, T. J., Janssen, R., & van Herwijnen, M. (2004). A genetic algorithm approach to multiobjective land use planning. Computers & Operations Research, 31(14), 2293-2313.
+
+[2] Janssen, R., van Herwijnen, M.,Stewart, T. J. & Aerts, J. (2008). Multiobjective decision support for land-use planning. Environment and Planning B: Planning and Design, 35, 740-756.
+
+
+# Appendix 
+Before running any of the below scripts, open the .Rproj file in the Land-use-planning folder. Apart from the `GA function and Implementation` script, the rest of the scripts can be run by just sourcing the R script. `GA function and Implementation` has instructions in the subsection below. 
+
+## Natural Value
+```{r,code=readLines("natural_value.R"),eval=FALSE}
+#source('recommenderDatasci/R/Rfold_CV.R') 
+```
+
+## Recreational Value
+```{r,code=readLines("recreational_value.R"),eval=FALSE}
+#source('recommenderDatasci/R/Rfold_CV.R') 
+```
+
+
+## Cost of Changing
+```{r,code=readLines("cost_changing.R"),eval=FALSE}
+#source('recommenderDatasci/R/Rfold_CV.R') 
+```
+
+
+## GA function and Implementation
+To implement this script, uncomment the objective function which you want to maximize/minimize and source the script. For objectives 1 and 2, line 170 of the script must be set to 1000 and for objective 3 to -100000.
+```{r,code=readLines("GA_implementation.R"),eval=FALSE}
+#source('recommenderDatasci/R/Rfold_CV.R') 
+```
+
+## Multiobjective Linear Program
+```{r,code=readLines("MOLP.R"),eval=FALSE}
+#source('recommenderDatasci/R/Rfold_CV.R') 
+```
+
+## Create Figures
+```{r,code=readLines("figure_recreate_grid.R"),eval=FALSE}
+#source('recommenderDatasci/R/Rfold_CV.R') 
+```
